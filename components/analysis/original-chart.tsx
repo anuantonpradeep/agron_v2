@@ -2,15 +2,14 @@
 
 import { useRef, type ChangeEvent, type DragEvent } from "react";
 import { SectionHeading } from "@/components/ui/primitives";
-import type { UploadItem, UploadStatus } from "@/lib/upload/types";
+import type { ChartItem, ChartItemStatus } from "@/lib/upload/types";
 
 /**
- * [1] Original Chart — the upload component.
+ * [1] Original Chart — the chart picker + queue.
  *
- * Presentational only: it renders the upload queue and the selected preview,
- * and reports user intent through callbacks. It has no knowledge of how uploads
- * are performed, so the underlying uploader (local now, S3 later) can change
- * without touching this component.
+ * Presentational only: it renders the selected preview and the queue of charts
+ * with their per-image analysis status, and reports user intent through
+ * callbacks. It has no knowledge of how analysis is performed.
  */
 export function OriginalChart({
   items,
@@ -20,8 +19,8 @@ export function OriginalChart({
   onRemove,
   disabled,
 }: {
-  items: UploadItem[];
-  selected: UploadItem | null;
+  items: ChartItem[];
+  selected: ChartItem | null;
   /** User picked or dropped one or more files. */
   onAddFiles: (files: FileList | File[]) => void;
   onSelect: (id: string) => void;
@@ -36,7 +35,7 @@ export function OriginalChart({
     e.target.value = "";
   }
 
-  function handleDrop(e: DragEvent<HTMLDivElement>) {
+  function handleDrop(e: DragEvent<HTMLElement>) {
     e.preventDefault();
     if (disabled) return;
     if (e.dataTransfer.files?.length) onAddFiles(e.dataTransfer.files);
@@ -80,7 +79,7 @@ export function OriginalChart({
                   style={{ borderColor: "var(--panel-border)" }}
                 >
                   <span className="flex min-w-0 items-center gap-2.5">
-                    <StatusBadge status={selected.status} progress={selected.progress} />
+                    <StatusBadge status={selected.status} />
                     <span className="truncate text-[12px] text-[var(--muted)]">
                       {selected.file.name}
                     </span>
@@ -98,8 +97,8 @@ export function OriginalChart({
             ) : null}
           </div>
 
-          {/* Upload queue */}
-          <UploadQueueList
+          {/* Chart queue */}
+          <ChartQueueList
             items={items}
             selectedId={selected?.id ?? null}
             onSelect={onSelect}
@@ -135,16 +134,16 @@ export function OriginalChart({
   );
 }
 
-/* ─── Upload queue list ───────────────────────────────────────────────────── */
+/* ─── Chart queue list ────────────────────────────────────────────────────── */
 
-function UploadQueueList({
+function ChartQueueList({
   items,
   selectedId,
   onSelect,
   onRemove,
   disabled,
 }: {
-  items: UploadItem[];
+  items: ChartItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
@@ -186,7 +185,7 @@ function UploadQueueList({
                 </span>
               </button>
 
-              <StatusBadge status={item.status} progress={item.progress} />
+              <StatusBadge status={item.status} />
 
               <button
                 type="button"
@@ -207,11 +206,11 @@ function UploadQueueList({
 
 /* ─── Status badge ────────────────────────────────────────────────────────── */
 
-function StatusBadge({ status, progress }: { status: UploadStatus; progress: number }) {
+function StatusBadge({ status }: { status: ChartItemStatus }) {
   const config = {
-    waiting: { label: "Waiting", color: "var(--muted)", bg: "rgba(255,255,255,0.05)", border: "var(--panel-border)" },
-    uploading: { label: `Uploading ${Math.round(progress * 100)}%`, color: "var(--info)", bg: "var(--info-bg)", border: "var(--info-border)" },
-    uploaded: { label: "Uploaded", color: "var(--accent)", bg: "var(--accent-bg)", border: "var(--accent-border)" },
+    queued: { label: "Queued", color: "var(--muted)", bg: "rgba(255,255,255,0.05)", border: "var(--panel-border)" },
+    analyzing: { label: "Analyzing", color: "var(--info)", bg: "var(--info-bg)", border: "var(--info-border)" },
+    analyzed: { label: "Analyzed", color: "var(--accent)", bg: "var(--accent-bg)", border: "var(--accent-border)" },
     failed: { label: "Failed", color: "var(--danger)", bg: "var(--danger-bg)", border: "var(--danger-border)" },
   }[status];
 
@@ -220,7 +219,7 @@ function StatusBadge({ status, progress }: { status: UploadStatus; progress: num
       className="inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium"
       style={{ color: config.color, background: config.bg, borderColor: config.border }}
     >
-      {status === "uploading" ? <Spinner /> : status === "uploaded" ? <CheckIcon /> : null}
+      {status === "analyzing" ? <Spinner /> : status === "analyzed" ? <CheckIcon /> : null}
       {config.label}
     </span>
   );

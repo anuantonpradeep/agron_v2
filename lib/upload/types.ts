@@ -1,52 +1,33 @@
+import type { ChartAnalysis } from "@/lib/analysis-types";
+
 /**
- * Upload abstraction.
+ * Chart-queue types.
  *
- * The UI depends only on these types — never on how bytes actually move. The
- * current implementation (`createLocalUploader`) keeps everything in the
- * browser and uses object URLs for preview. A future S3 uploader simply
- * implements the same `Uploader` interface and is passed in its place; no UI
- * component needs to change.
+ * Each selected/dropped chart becomes a queue item that is analyzed
+ * independently. Nothing is uploaded or stored — the image lives only as a
+ * browser object URL (preview) and is sent in-flight to the analysis request.
  */
 
-export type UploadStatus = "waiting" | "uploading" | "uploaded" | "failed";
+export type ChartItemStatus = "queued" | "analyzing" | "analyzed" | "failed";
 
-/** One image in the upload queue. */
-export interface UploadItem {
-  /** Stable client-side id. */
+/** One chart in the queue. */
+export interface ChartItem {
   id: string;
   file: File;
-  /** Object URL for preview ONLY — not a durable/remote location. */
+  /** Object URL for preview ONLY — revoked on remove/unmount. */
   previewUrl: string;
-  status: UploadStatus;
-  /** 0..1 upload progress. */
-  progress: number;
-  /**
-   * Reference returned by the uploader once complete (e.g. an S3 key/URL
-   * later). `null` until the upload finishes.
-   */
-  remoteRef: string | null;
+  status: ChartItemStatus;
+  /** Populated once analysis completes. */
+  analysis?: ChartAnalysis;
   /** Populated when `status === "failed"`. */
   error?: string;
 }
 
-/** Result of a successful upload. */
-export interface UploadResult {
-  /** Durable reference to the stored object (e.g. S3 key). */
-  ref: string;
-  /** Optional directly-accessible URL, if the backend returns one. */
-  url?: string;
-}
-
-export interface UploadOptions {
-  onProgress?: (progress: number) => void;
-  signal?: AbortSignal;
-}
-
 /**
- * Moves a single file to storage. Implementations report progress through
- * `onProgress` and resolve with a durable reference. Must reject with an
- * `AbortError` if `signal` aborts.
+ * Performs analysis for one chart. The UI depends only on this interface, so
+ * the implementation (currently a call to /api/analyze) can change without
+ * touching the queue or components.
  */
-export interface Uploader {
-  upload(file: File, options?: UploadOptions): Promise<UploadResult>;
+export interface ChartAnalyzer {
+  analyze(file: File, options?: { signal?: AbortSignal }): Promise<ChartAnalysis>;
 }

@@ -1,20 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Uploader, UploadItem } from "./types";
-import { createLocalUploader } from "./local-uploader";
+import type { ChartAnalyzer, ChartItem } from "./types";
+import { createChartAnalyzer } from "./analyzer";
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
   }
-  return `u_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  return `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export interface UploadQueue {
-  items: UploadItem[];
+export interface ChartQueue {
+  items: ChartItem[];
   selectedId: string | null;
-  selected: UploadItem | null;
+  selected: ChartItem | null;
   /** Add one or more images to the queue (non-images are ignored). */
   addFiles: (files: File[] | FileList) => void;
   /** Make an item the active preview. */
@@ -24,28 +24,25 @@ export interface UploadQueue {
 }
 
 /**
- * Owns upload-queue state and drives uploads through the injected `Uploader`.
+ * Owns the chart queue and analyzes each item independently.
  *
- * Files are processed sequentially (one "uploading" at a time) so the queue's
- * waiting / uploading / uploaded states are meaningful. The hook is agnostic to
- * the uploader implementation — pass an S3 uploader later and nothing here or
- * in the UI changes.
+ * Items are processed sequentially (one "analyzing" at a time) through the
+ * injected analyzer; the result is stored on the item. No persistence — results
+ * live only in React state and vanish on refresh.
  */
-export function useUploadQueue(uploader?: Uploader): UploadQueue {
-  // Default to the local (browser-only) uploader; stable across renders.
-  const fallback = useMemo(() => createLocalUploader(), []);
-  const uploaderRef = useRef<Uploader>(uploader ?? fallback);
-  uploaderRef.current = uploader ?? fallback;
+export function useChartQueue(analyzer?: ChartAnalyzer): ChartQueue {
+  const fallback = useMemo(() => createChartAnalyzer(), []);
+  const analyzerRef = useRef<ChartAnalyzer>(analyzer ?? fallback);
+  analyzerRef.current = analyzer ?? fallback;
 
-  const [items, setItems] = useState<UploadItem[]>([]);
+  const [items, setItems] = useState<ChartItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Keep a live snapshot for the async queue runner and cleanup.
-  const itemsRef = useRef<UploadItem[]>([]);
+  const itemsRef = useRef<ChartItem[]>([]);
   itemsRef.current = items;
   const processingRef = useRef(false);
 
-  const update = useCallback((id: string, patch: Partial<UploadItem>) => {
+  const update = useCallback((id: string, patch: Partial<ChartItem>) => {
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
   }, []);
 
@@ -53,22 +50,20 @@ export function useUploadQueue(uploader?: Uploader): UploadQueue {
     if (processingRef.current) return;
     processingRef.current = true;
     try {
-      // Loop until no waiting items remain (new ones may arrive mid-run).
+      // Loop until no queued items remain (new ones may arrive mid-run).
       // eslint-disable-next-line no-constant-condition
       while (true) {
-        const next = itemsRef.current.find((it) => it.status === "waiting");
+        const next = itemsRef.current.find((it) => it.status === "queued");
         if (!next) break;
 
-        update(next.id, { status: "uploading", progress: 0 });
+        update(next.id, { status: "analyzing" });
         try {
-          const result = await uploaderRef.current.upload(next.file, {
-            onProgress: (p) => update(next.id, { progress: p }),
-          });
-          update(next.id, { status: "uploaded", progress: 1, remoteRef: result.ref });
+          const analysis = await analyzerRef.current.analyze(next.file);
+          update(next.id, { status: "analyzed", analysis });
         } catch (err) {
           update(next.id, {
             status: "failed",
-            error: err instanceof Error ? err.message : "Upload failed",
+            error: err instanceof Error ? err.message : "Analysis failed",
           });
         }
       }
@@ -77,9 +72,9 @@ export function useUploadQueue(uploader?: Uploader): UploadQueue {
     }
   }, [update]);
 
-  // Kick the runner whenever something is waiting.
+  // Kick the runner whenever something is queued.
   useEffect(() => {
-    if (!processingRef.current && items.some((it) => it.status === "waiting")) {
+    if (!processingRef.current && items.some((it) => it.status === "queued")) {
       void processQueue();
     }
   }, [items, processQueue]);
@@ -88,13 +83,11 @@ export function useUploadQueue(uploader?: Uploader): UploadQueue {
     const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) return;
 
-    const created: UploadItem[] = images.map((file) => ({
+    const created: ChartItem[] = images.map((file) => ({
       id: makeId(),
       file,
       previewUrl: URL.createObjectURL(file),
-      status: "waiting",
-      progress: 0,
-      remoteRef: null,
+      status: "queued",
     }));
 
     setItems((prev) => [...prev, ...created]);

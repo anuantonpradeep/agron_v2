@@ -1,8 +1,9 @@
 "use client";
 
-import type { ChartAnalysis, AnalysisStatus } from "@/lib/analysis-types";
-import type { Uploader } from "@/lib/upload/types";
-import { useUploadQueue } from "@/lib/upload/use-upload-queue";
+import { useMemo } from "react";
+import type { ChartAnalyzer } from "@/lib/upload/types";
+import { useChartQueue } from "@/lib/upload/use-chart-queue";
+import { createChartAnalyzer } from "@/lib/upload/analyzer";
 import { OriginalChart } from "./original-chart";
 import { MetadataPanel } from "./metadata-panel";
 import { MarketContextPanel } from "./market-context-panel";
@@ -15,32 +16,19 @@ import { TagsConceptsPanel } from "./tags-concepts-panel";
 /**
  * Chart analysis screen (one "Memory").
  *
- * Upload is real (see `useUploadQueue`); analysis is still prop-driven so the
- * backend can hydrate it later:
- *  - `analysis` carries the structured result once available.
- *  - `status` optionally overrides the derived analysis lifecycle.
- *  - `uploader` injects the storage implementation (defaults to a browser-only
- *    uploader; pass an S3 uploader later with no other changes).
- *
- * With no `analysis`, sections render empty states; once the selected chart has
- * finished uploading they render loading states, ready for the backend.
+ * Selecting/dropping charts queues each one and analyzes it independently
+ * (image → /api/analyze → ChartAnalysis). The selected chart drives the eight
+ * panels: empty before analysis, loading while analyzing, populated once done,
+ * or an error banner on failure. Nothing is uploaded or persisted.
  */
-export function AnalysisView({
-  analysis,
-  status,
-  uploader,
-}: {
-  analysis?: ChartAnalysis;
-  status?: AnalysisStatus;
-  uploader?: Uploader;
-}) {
-  const queue = useUploadQueue(uploader);
+export function AnalysisView({ analyzer }: { analyzer?: ChartAnalyzer }) {
+  const activeAnalyzer = useMemo(() => analyzer ?? createChartAnalyzer(), [analyzer]);
+  const queue = useChartQueue(activeAnalyzer);
 
-  // Analysis begins only after the selected chart has finished uploading.
-  const selectedUploaded = queue.selected?.status === "uploaded";
-  const effectiveStatus: AnalysisStatus =
-    status ?? (analysis ? "complete" : selectedUploaded ? "analyzing" : "idle");
-  const loading = effectiveStatus === "analyzing";
+  const selected = queue.selected;
+  const analysis = selected?.analysis;
+  const loading = selected?.status === "queued" || selected?.status === "analyzing";
+  const failed = selected?.status === "failed";
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-[1480px] px-6 py-8 lg:px-10">
@@ -54,6 +42,14 @@ export function AnalysisView({
             onSelect={queue.select}
             onRemove={queue.remove}
           />
+          {failed ? (
+            <div
+              className="rounded-lg border px-4 py-3 text-[13px]"
+              style={{ background: "var(--danger-bg)", borderColor: "var(--danger-border)", color: "var(--danger)" }}
+            >
+              {selected?.error ?? "Analysis failed."}
+            </div>
+          ) : null}
           <MetadataPanel metadata={analysis?.metadata} loading={loading} />
           <MarketContextPanel context={analysis?.marketContext} loading={loading} />
         </div>

@@ -3,14 +3,12 @@ import { AnalysisView } from "@/components/analysis/analysis-view";
 /**
  * Memory detail / new-analysis screen.
  *
- * Upload is real (browser-only for now). No analysis is passed yet, so every
- * analysis section renders its empty state. Selecting/dropping charts shows the
- * preview immediately and runs them through the upload queue; once the selected
- * chart finishes uploading the analysis sections switch to their loading state,
- * ready for the backend to populate `analysis`.
+ * Selecting/dropping charts shows each preview immediately and analyzes each
+ * one independently (image → /api/analyze → ChartAnalysis). The selected chart
+ * drives the eight panels: empty before analysis, loading while analyzing,
+ * populated when done. Nothing is uploaded or persisted.
  *
- * To wire up the backend later, lift state here and pass `analysis` + `status`
- * down. To use S3, pass an `uploader` implementing the `Uploader` interface.
+ * Requires ANTHROPIC_API_KEY — see .env.local.example.
  */
 export default function Home() {
   return <AnalysisView />;
