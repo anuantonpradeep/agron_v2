@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/* ─── Agron V2 — Analysis UI Design Tokens ─────────────────────────────────── */
+
+:root {
+  --background: #0a0a0c;
+  --foreground: #ededef;
+  --foreground-secondary: #b4b4bc;
+
+  --panel: #111114;
+  --panel-border: rgba(255, 255, 255, 0.07);
+  --surface: #161619;
+  --surface-border: rgba(255, 255, 255, 0.06);
+
+  --muted: #8b8b96;
+  --muted-light: #5c5c66;
+
+  /* Section index badge / concept pills */
+  --violet: #a78bfa;
+  --violet-bg: rgba(139, 92, 246, 0.16);
+  --violet-border: rgba(139, 92, 246, 0.32);
+
+  /* Semantic */
+  --accent: #34d399;
+  --accent-bg: rgba(52, 211, 153, 0.12);
+  --accent-border: rgba(52, 211, 153, 0.28);
+
+  --warning: #fbbf24;
+  --warning-bg: rgba(251, 191, 36, 0.12);
+  --warning-border: rgba(251, 191, 36, 0.28);
+
+  --info: #60a5fa;
+  --info-bg: rgba(96, 165, 250, 0.12);
+  --info-border: rgba(96, 165, 250, 0.28);
+
+  --danger: #f87171;
+  --danger-bg: rgba(248, 113, 113, 0.1);
+  --danger-border: rgba(248, 113, 113, 0.28);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+@keyframes agron-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.18;
+  }
+}
+
+.agron-skeleton {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  animation: agron-pulse 1.6s ease-in-out infinite;
+}
