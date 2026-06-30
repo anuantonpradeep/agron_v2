@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChartAnalyzer, ChartItem } from "./types";
+import type { ChartAnalyzer, ChartItem, MemorySaver } from "./types";
 import { createChartAnalyzer } from "./analyzer";
+import { createMemorySaver } from "./memory-saver";
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -21,21 +22,33 @@ export interface ChartQueue {
   select: (id: string) => void;
   /** Remove an item and revoke its preview URL. */
   remove: (id: string) => void;
+  /** Update the user's notes for an item (marks it unsaved). */
+  setNotes: (id: string, notes: string) => void;
+  /** Persist one analyzed item to S3. */
+  save: (id: string) => Promise<void>;
+  /** Persist every analyzed, not-yet-saved item. */
+  saveAll: () => Promise<void>;
 }
 
 /**
- * Owns the chart queue and analyzes each item independently.
+ * Owns the chart queue: analyzes each item independently, holds its notes, and
+ * persists it (image + analysis incl. notes) on demand.
  *
- * Items are processed sequentially (one "analyzing" at a time) through the
- * injected analyzer; the result is stored on the item. No persistence — results
- * live only in React state and vanish on refresh.
+ * Analysis runs sequentially through the injected analyzer; saving goes through
+ * the injected saver. The item is the single source of truth for its Memory.
  */
-export function useChartQueue(analyzer?: ChartAnalyzer): ChartQueue {
+export function useChartQueue(analyzer?: ChartAnalyzer, saver?: MemorySaver): ChartQueue {
   const fallback = useMemo(() => createChartAnalyzer(), []);
   const analyzerRef = useRef<ChartAnalyzer>(analyzer ?? fallback);
   useEffect(() => {
     analyzerRef.current = analyzer ?? fallback;
   }, [analyzer, fallback]);
+
+  const fallbackSaver = useMemo(() => createMemorySaver(), []);
+  const saverRef = useRef<MemorySaver>(saver ?? fallbackSaver);
+  useEffect(() => {
+    saverRef.current = saver ?? fallbackSaver;
+  }, [saver, fallbackSaver]);
 
   const [items, setItems] = useState<ChartItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -92,6 +105,8 @@ export function useChartQueue(analyzer?: ChartAnalyzer): ChartQueue {
       file,
       previewUrl: URL.createObjectURL(file),
       status: "queued",
+      notes: "",
+      saveStatus: "unsaved",
     }));
 
     setItems((prev) => [...prev, ...created]);
@@ -113,6 +128,54 @@ export function useChartQueue(analyzer?: ChartAnalyzer): ChartQueue {
     });
   }, []);
 
+  // Editing notes invalidates a prior save.
+  const setNotes = useCallback(
+    (id: string, notes: string) => {
+      setItems((prev) =>
+        prev.map((it) =>
+          it.id === id
+            ? { ...it, notes, saveStatus: it.saveStatus === "saved" ? "unsaved" : it.saveStatus }
+            : it,
+        ),
+      );
+    },
+    [],
+  );
+
+  const save = useCallback(
+    async (id: string) => {
+      const item = itemsRef.current.find((it) => it.id === id);
+      if (!item || item.status !== "analyzed" || !item.analysis) return;
+      if (item.saveStatus === "saving") return;
+
+      update(id, { saveStatus: "saving", saveError: undefined });
+      try {
+        await saverRef.current.save({
+          id: item.id,
+          file: item.file,
+          analysis: item.analysis,
+          notes: item.notes,
+        });
+        update(id, { saveStatus: "saved" });
+      } catch (err) {
+        update(id, {
+          saveStatus: "failed",
+          saveError: err instanceof Error ? err.message : "Save failed",
+        });
+      }
+    },
+    [update],
+  );
+
+  const saveAll = useCallback(async () => {
+    const ids = itemsRef.current
+      .filter((it) => it.status === "analyzed" && it.saveStatus !== "saved" && it.saveStatus !== "saving")
+      .map((it) => it.id);
+    for (const id of ids) {
+      await save(id);
+    }
+  }, [save]);
+
   // Revoke every created object URL on unmount.
   useEffect(() => {
     return () => {
@@ -125,5 +188,5 @@ export function useChartQueue(analyzer?: ChartAnalyzer): ChartQueue {
     [items, selectedId],
   );
 
-  return { items, selectedId, selected, addFiles, select, remove };
+  return { items, selectedId, selected, addFiles, select, remove, setNotes, save, saveAll };
 }

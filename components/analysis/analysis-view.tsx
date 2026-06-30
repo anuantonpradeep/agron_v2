@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { ChartAnalyzer } from "@/lib/upload/types";
 import { useChartQueue } from "@/lib/upload/use-chart-queue";
 import { createChartAnalyzer } from "@/lib/upload/analyzer";
@@ -31,11 +31,10 @@ export function AnalysisView({ analyzer }: { analyzer?: ChartAnalyzer }) {
   const loading = selected?.status === "queued" || selected?.status === "analyzing";
   const failed = selected?.status === "failed";
 
-  // The user's own notes, kept per chart in memory only (no persistence yet).
-  const [notesByItem, setNotesByItem] = useState<Record<string, string>>({});
-  const notes = selected ? notesByItem[selected.id] ?? "" : "";
+  // Notes live on the selected item (the single source of truth for its Memory).
+  const notes = selected?.notes ?? "";
   const setNotes = (value: string) => {
-    if (selected) setNotesByItem((prev) => ({ ...prev, [selected.id]: value }));
+    if (selected) queue.setNotes(selected.id, value);
   };
 
   return (
@@ -49,6 +48,8 @@ export function AnalysisView({ analyzer }: { analyzer?: ChartAnalyzer }) {
             onAddFiles={queue.addFiles}
             onSelect={queue.select}
             onRemove={queue.remove}
+            onSave={queue.save}
+            onSaveAll={queue.saveAll}
           />
           {failed ? (
             <div

@@ -2,7 +2,7 @@
 
 import { useRef, type ChangeEvent, type DragEvent } from "react";
 import { SectionHeading } from "@/components/ui/primitives";
-import type { ChartItem, ChartItemStatus } from "@/lib/upload/types";
+import type { ChartItem, ChartItemStatus, SaveStatus } from "@/lib/upload/types";
 
 /**
  * [1] Original Chart — the chart picker + queue.
@@ -17,6 +17,8 @@ export function OriginalChart({
   onAddFiles,
   onSelect,
   onRemove,
+  onSave,
+  onSaveAll,
   disabled,
 }: {
   items: ChartItem[];
@@ -25,6 +27,10 @@ export function OriginalChart({
   onAddFiles: (files: FileList | File[]) => void;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
+  /** Save one analyzed chart. */
+  onSave: (id: string) => void;
+  /** Save all analyzed, not-yet-saved charts. */
+  onSaveAll: () => void;
   disabled?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -42,6 +48,9 @@ export function OriginalChart({
   }
 
   const hasItems = items.length > 0;
+  const saveableCount = items.filter(
+    (it) => it.status === "analyzed" && it.saveStatus !== "saved" && it.saveStatus !== "saving",
+  ).length;
 
   return (
     <section className="flex flex-col gap-3">
@@ -97,12 +106,29 @@ export function OriginalChart({
             ) : null}
           </div>
 
+          {/* Queue header — save the whole batch */}
+          <div className="flex items-center justify-between">
+            <span className="text-[12px] text-[var(--muted)]">
+              {items.length} chart{items.length === 1 ? "" : "s"}
+            </span>
+            <button
+              type="button"
+              onClick={onSaveAll}
+              disabled={disabled || saveableCount === 0}
+              className="rounded-md border px-3 py-1 text-[12px] font-medium transition-colors disabled:opacity-40"
+              style={{ color: "var(--accent)", background: "var(--accent-bg)", borderColor: "var(--accent-border)" }}
+            >
+              Save all{saveableCount > 0 ? ` (${saveableCount})` : ""}
+            </button>
+          </div>
+
           {/* Chart queue */}
           <ChartQueueList
             items={items}
             selectedId={selected?.id ?? null}
             onSelect={onSelect}
             onRemove={onRemove}
+            onSave={onSave}
             disabled={disabled}
           />
         </div>
@@ -141,12 +167,14 @@ function ChartQueueList({
   selectedId,
   onSelect,
   onRemove,
+  onSave,
   disabled,
 }: {
   items: ChartItem[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
+  onSave: (id: string) => void;
   disabled?: boolean;
 }) {
   return (
@@ -187,6 +215,15 @@ function ChartQueueList({
 
               <StatusBadge status={item.status} />
 
+              {item.status === "analyzed" ? (
+                <SaveControl
+                  status={item.saveStatus}
+                  error={item.saveError}
+                  onSave={() => onSave(item.id)}
+                  disabled={disabled}
+                />
+              ) : null}
+
               <button
                 type="button"
                 onClick={() => onRemove(item.id)}
@@ -222,6 +259,57 @@ function StatusBadge({ status }: { status: ChartItemStatus }) {
       {status === "analyzing" ? <Spinner /> : status === "analyzed" ? <CheckIcon /> : null}
       {config.label}
     </span>
+  );
+}
+
+/* ─── Save control ────────────────────────────────────────────────────────── */
+
+function SaveControl({
+  status,
+  error,
+  onSave,
+  disabled,
+}: {
+  status: SaveStatus;
+  error?: string;
+  onSave: () => void;
+  disabled?: boolean;
+}) {
+  const badge =
+    "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium";
+
+  if (status === "saving") {
+    return (
+      <span className={badge} style={{ color: "var(--info)", background: "var(--info-bg)", borderColor: "var(--info-border)" }}>
+        <Spinner />
+        Saving
+      </span>
+    );
+  }
+  if (status === "saved") {
+    return (
+      <span className={badge} style={{ color: "var(--accent)", background: "var(--accent-bg)", borderColor: "var(--accent-border)" }}>
+        <CheckIcon />
+        Saved
+      </span>
+    );
+  }
+  const failed = status === "failed";
+  return (
+    <button
+      type="button"
+      onClick={onSave}
+      disabled={disabled}
+      title={failed ? error : undefined}
+      className={`${badge} transition-colors disabled:opacity-40`}
+      style={
+        failed
+          ? { color: "var(--danger)", background: "var(--danger-bg)", borderColor: "var(--danger-border)" }
+          : { color: "var(--violet)", background: "var(--violet-bg)", borderColor: "var(--violet-border)" }
+      }
+    >
+      {failed ? "Retry" : "Save"}
+    </button>
   );
 }
 

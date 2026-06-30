@@ -9,8 +9,9 @@ import type { ChartAnalysis } from "@/lib/analysis-types";
  */
 
 export type ChartItemStatus = "queued" | "analyzing" | "analyzed" | "failed";
+export type SaveStatus = "unsaved" | "saving" | "saved" | "failed";
 
-/** One chart in the queue. */
+/** One chart in the queue — the single source of truth for a Memory. */
 export interface ChartItem {
   id: string;
   file: File;
@@ -21,6 +22,33 @@ export interface ChartItem {
   analysis?: ChartAnalysis;
   /** Populated when `status === "failed"`. */
   error?: string;
+  /** The user's own notes for this chart. Sent nested inside the analysis on save. */
+  notes: string;
+  /** Persistence lifecycle for this chart. */
+  saveStatus: SaveStatus;
+  /** Populated when `saveStatus === "failed"`. */
+  saveError?: string;
+}
+
+/** Result of persisting one Memory. */
+export interface SaveResult {
+  id: string;
+  savedAt: string;
+  imageKey: string;
+}
+
+/**
+ * Persists one Memory (image + analysis incl. notes). The UI depends only on
+ * this interface, so the storage backend can change without touching the queue
+ * or components.
+ */
+export interface MemorySaver {
+  save(memory: {
+    id: string;
+    file: File;
+    analysis: ChartAnalysis;
+    notes: string;
+  }): Promise<SaveResult>;
 }
 
 /**

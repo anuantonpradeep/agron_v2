@@ -1,0 +1,76 @@
+import { putObject } from "@/lib/aws/s3";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
+const EXT: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+};
+
+/**
+ * POST /api/memories  (multipart: "image" File + "memory" JSON string)
+ *
+ * Persists one Memory to S3:
+ *   memories/{id}/original.<ext>   — the uploaded image
+ *   memories/{id}/memory.json      — JSON.stringify(memory) + savedAt/image key
+ *
+ * The memory JSON is serialized generically — this route never enumerates the
+ * analysis fields, so new analysis sections persist automatically. Notes are
+ * already nested inside `memory.analysis` by the client.
+ *
+ * NOTE: unauthenticated / dev-only — auth + per-user key prefix come later.
+ */
+export async function POST(request: Request) {
+  let image: File | null = null;
+  let memory: Record<string, unknown> | null = null;
+  try {
+    const form = await request.formData();
+    const f = form.get("image");
+    if (f instanceof File) image = f;
+    const m = form.get("memory");
+    if (typeof m === "string") memory = JSON.parse(m);
+  } catch {
+    return Response.json({ error: "Invalid form data" }, { status: 400 });
+  }
+
+  if (!image) return Response.json({ error: "Missing image" }, { status: 400 });
+  if (!memory || typeof memory.id !== "string") {
+    return Response.json({ error: "Missing or invalid memory" }, { status: 400 });
+  }
+  const ext = EXT[image.type];
+  if (!ext) return Response.json({ error: "Unsupported image type" }, { status: 415 });
+
+  const id = memory.id;
+  const imageKey = `memories/${id}/original.${ext}`;
+  const savedAt = new Date().toISOString();
+
+  const doc = {
+    ...memory,
+    savedAt,
+    image: {
+      ...(typeof memory.image === "object" && memory.image ? memory.image : {}),
+      key: imageKey,
+      contentType: image.type,
+    },
+  };
+
+  try {
+    const bytes = new Uint8Array(await image.arrayBuffer());
+    await putObject({ key: imageKey, body: bytes, contentType: image.type });
+    await putObject({
+      key: `memories/${id}/memory.json`,
+      body: JSON.stringify(doc, null, 2),
+      contentType: "application/json",
+    });
+    return Response.json({ id, savedAt, imageKey });
+  } catch (err) {
+    console.error("save memory failed", err);
+    return Response.json(
+      { error: "Save failed. Check AWS credentials / bucket and server logs." },
+      { status: 502 },
+    );
+  }
+}
