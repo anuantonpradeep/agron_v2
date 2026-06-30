@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { ChartAnalyzer } from "@/lib/upload/types";
 import { useChartQueue } from "@/lib/upload/use-chart-queue";
 import { createChartAnalyzer } from "@/lib/upload/analyzer";
@@ -12,6 +12,7 @@ import { InterpretationPanel } from "./interpretation-panel";
 import { EvidencePanel } from "./evidence-panel";
 import { TradeIdeasPanel } from "./trade-ideas-panel";
 import { TagsConceptsPanel } from "./tags-concepts-panel";
+import { NotesPanel } from "./notes-panel";
 
 /**
  * Chart analysis screen (one "Memory").
@@ -29,6 +30,13 @@ export function AnalysisView({ analyzer }: { analyzer?: ChartAnalyzer }) {
   const analysis = selected?.analysis;
   const loading = selected?.status === "queued" || selected?.status === "analyzing";
   const failed = selected?.status === "failed";
+
+  // The user's own notes, kept per chart in memory only (no persistence yet).
+  const [notesByItem, setNotesByItem] = useState<Record<string, string>>({});
+  const notes = selected ? notesByItem[selected.id] ?? "" : "";
+  const setNotes = (value: string) => {
+    if (selected) setNotesByItem((prev) => ({ ...prev, [selected.id]: value }));
+  };
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-[1480px] px-6 py-8 lg:px-10">
@@ -61,6 +69,7 @@ export function AnalysisView({ analyzer }: { analyzer?: ChartAnalyzer }) {
           <EvidencePanel evidence={analysis?.evidence} loading={loading} />
           <TradeIdeasPanel tradeIdeas={analysis?.tradeIdeas} loading={loading} />
           <TagsConceptsPanel concepts={analysis?.concepts} loading={loading} />
+          <NotesPanel value={notes} onChange={setNotes} disabled={!selected} />
         </div>
       </div>
     </main>

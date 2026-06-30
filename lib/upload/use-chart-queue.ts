@@ -33,13 +33,18 @@ export interface ChartQueue {
 export function useChartQueue(analyzer?: ChartAnalyzer): ChartQueue {
   const fallback = useMemo(() => createChartAnalyzer(), []);
   const analyzerRef = useRef<ChartAnalyzer>(analyzer ?? fallback);
-  analyzerRef.current = analyzer ?? fallback;
+  useEffect(() => {
+    analyzerRef.current = analyzer ?? fallback;
+  }, [analyzer, fallback]);
 
   const [items, setItems] = useState<ChartItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // Live snapshot for the async queue runner and cleanup (kept current via effect).
   const itemsRef = useRef<ChartItem[]>([]);
-  itemsRef.current = items;
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
   const processingRef = useRef(false);
 
   const update = useCallback((id: string, patch: Partial<ChartItem>) => {
@@ -51,7 +56,6 @@ export function useChartQueue(analyzer?: ChartAnalyzer): ChartQueue {
     processingRef.current = true;
     try {
       // Loop until no queued items remain (new ones may arrive mid-run).
-      // eslint-disable-next-line no-constant-condition
       while (true) {
         const next = itemsRef.current.find((it) => it.status === "queued");
         if (!next) break;
