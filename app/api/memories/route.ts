@@ -1,4 +1,6 @@
+import { cookies } from "next/headers";
 import { putObject } from "@/lib/aws/s3";
+import { decodeSession, SESSION_COOKIE } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -13,17 +15,20 @@ const EXT: Record<string, string> = {
 /**
  * POST /api/memories  (multipart: "image" File + "memory" JSON string)
  *
- * Persists one Memory to S3:
- *   memories/{id}/original.<ext>   — the uploaded image
- *   memories/{id}/memory.json      — JSON.stringify(memory) + savedAt/image key
+ * Persists one Memory to S3, scoped to the authenticated user:
+ *   users/{userId}/memories/{id}/original.<ext>   — the uploaded image
+ *   users/{userId}/memories/{id}/memory.json      — JSON.stringify(memory)
  *
  * The memory JSON is serialized generically — this route never enumerates the
  * analysis fields, so new analysis sections persist automatically. Notes are
  * already nested inside `memory.analysis` by the client.
- *
- * NOTE: unauthenticated / dev-only — auth + per-user key prefix come later.
  */
 export async function POST(request: Request) {
+  const store = await cookies();
+  const session = await decodeSession(store.get(SESSION_COOKIE)?.value);
+  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const userId = session.sub;
+
   let image: File | null = null;
   let memory: Record<string, unknown> | null = null;
   try {
@@ -44,7 +49,8 @@ export async function POST(request: Request) {
   if (!ext) return Response.json({ error: "Unsupported image type" }, { status: 415 });
 
   const id = memory.id;
-  const imageKey = `memories/${id}/original.${ext}`;
+  const prefix = `users/${userId}/memories/${id}`;
+  const imageKey = `${prefix}/original.${ext}`;
   const savedAt = new Date().toISOString();
 
   const doc = {
@@ -61,7 +67,7 @@ export async function POST(request: Request) {
     const bytes = new Uint8Array(await image.arrayBuffer());
     await putObject({ key: imageKey, body: bytes, contentType: image.type });
     await putObject({
-      key: `memories/${id}/memory.json`,
+      key: `${prefix}/memory.json`,
       body: JSON.stringify(doc, null, 2),
       contentType: "application/json",
     });

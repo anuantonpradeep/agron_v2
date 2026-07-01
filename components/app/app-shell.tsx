@@ -10,6 +10,10 @@ import { ChartQueueProvider } from "@/components/providers/chart-queue-provider"
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+
+  // The login page has its own full-screen layout — no app nav.
+  if (pathname === "/login") return <>{children}</>;
+
   return (
     <ChartQueueProvider>
       <nav
@@ -23,9 +27,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <NavLink href="/chat" active={pathname === "/chat"}>
           Ask
         </NavLink>
+        <SignOut />
       </nav>
       {children}
     </ChartQueueProvider>
+  );
+}
+
+function SignOut() {
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    window.location.href = "/login";
+  }
+  return (
+    <button
+      type="button"
+      onClick={signOut}
+      className="ml-auto rounded-md px-3 py-1.5 text-[13px] font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)]"
+    >
+      Sign out
+    </button>
   );
 }
 
