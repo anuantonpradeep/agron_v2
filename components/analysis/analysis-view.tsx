@@ -1,9 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
-import type { ChartAnalyzer } from "@/lib/upload/types";
-import { useChartQueue } from "@/lib/upload/use-chart-queue";
-import { createChartAnalyzer } from "@/lib/upload/analyzer";
+import { useChartQueueContext } from "@/components/providers/chart-queue-provider";
 import { OriginalChart } from "./original-chart";
 import { MetadataPanel } from "./metadata-panel";
 import { MarketContextPanel } from "./market-context-panel";
@@ -22,9 +19,8 @@ import { NotesPanel } from "./notes-panel";
  * panels: empty before analysis, loading while analyzing, populated once done,
  * or an error banner on failure. Nothing is uploaded or persisted.
  */
-export function AnalysisView({ analyzer }: { analyzer?: ChartAnalyzer }) {
-  const activeAnalyzer = useMemo(() => analyzer ?? createChartAnalyzer(), [analyzer]);
-  const queue = useChartQueue(activeAnalyzer);
+export function AnalysisView() {
+  const queue = useChartQueueContext();
 
   const selected = queue.selected;
   const analysis = selected?.analysis;
