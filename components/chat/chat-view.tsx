@@ -1,46 +1,41 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import Link from "next/link";
 import { useChartQueueContext } from "@/components/providers/chart-queue-provider";
 import { streamChat } from "@/lib/chat/stream-chat";
 import { loadChat, saveChat } from "@/lib/chat/chat-storage";
 import { useDictation } from "@/components/analysis/use-dictation";
 import type { ChartItem } from "@/lib/upload/types";
-import type { ChatMessage, ChatSourceRef } from "@/lib/chat/types";
+import type { ChatMessage } from "@/lib/chat/types";
 
 function labelOf(item: ChartItem): string {
   return item.analysis?.metadata?.symbol?.trim() || item.file.name;
 }
 
 /**
- * Cursor-style split: workbench (sources + provenance) on the left, chat on the
- * right. Grounded in the current session's analyzed charts that the user adds
- * to the basket. The conversation + basket persist across refresh (localStorage);
- * cleared on sign-out.
+ * Cursor-style split: workbench (search status + provenance) left, chat right.
+ * Agron auto-searches the current session's analyzed charts AND everything the
+ * user has saved (S3), retrieves the relevant ones, and answers grounded in
+ * them. The conversation persists across refresh (localStorage).
  */
 export function ChatView() {
   const queue = useChartQueueContext();
   const analyzed = queue.items.filter((it) => it.status === "analyzed" && it.analysis);
 
-  const [basket, setBasket] = useState<string[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [reindex, setReindex] = useState<"idle" | "syncing" | "done" | "failed">("idle");
   const hydratedRef = useRef(false);
 
-  // Restore the conversation + basket once, on mount.
+  // Restore the conversation once, on mount.
   useEffect(() => {
     const persisted = loadChat();
     if (persisted) {
       let restored = persisted.messages;
-      // Drop a trailing assistant message left empty by an interrupted stream.
       const last = restored[restored.length - 1];
-      if (last && last.role === "assistant" && !last.content.trim()) {
-        restored = restored.slice(0, -1);
-      }
+      if (last && last.role === "assistant" && !last.content.trim()) restored = restored.slice(0, -1);
       setMessages(restored);
-      setBasket(persisted.basket);
     }
     hydratedRef.current = true;
   }, []);
@@ -48,9 +43,9 @@ export function ChatView() {
   // Persist (debounced) after hydration.
   useEffect(() => {
     if (!hydratedRef.current) return;
-    const timer = setTimeout(() => saveChat({ messages, basket }), 400);
+    const timer = setTimeout(() => saveChat({ messages }), 400);
     return () => clearTimeout(timer);
-  }, [messages, basket]);
+  }, [messages]);
 
   const { supported: micSupported, listening, start: micStart, stop: micStop } = useDictation((chunk) =>
     setInput((prev) => (prev.trim() ? `${prev.trim()} ${chunk}` : chunk)),
@@ -61,11 +56,7 @@ export function ChatView() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages]);
 
-  const toggle = (id: string) =>
-    setBasket((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-
-  const inScope = analyzed.filter((it) => basket.includes(it.id));
-  const canSend = !streaming && input.trim().length > 0 && inScope.length > 0;
+  const canSend = !streaming && input.trim().length > 0;
 
   function updateLastAssistant(fn: (m: ChatMessage) => ChatMessage) {
     setMessages((prev) => {
@@ -82,10 +73,14 @@ export function ChatView() {
 
   async function send() {
     const question = input.trim();
-    if (!question || streaming || inScope.length === 0) return;
+    if (!question || streaming) return;
 
-    const sourceRefs: ChatSourceRef[] = inScope.map((it) => ({ id: it.id, label: labelOf(it) }));
-    const wireSources = inScope.map((it) => ({ label: labelOf(it), analysis: it.analysis!, notes: it.notes }));
+    const sessionCharts = analyzed.map((it) => ({
+      id: it.id,
+      label: labelOf(it),
+      analysis: it.analysis!,
+      notes: it.notes,
+    }));
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
 
     setInput("");
@@ -93,14 +88,15 @@ export function ChatView() {
     setMessages((prev) => [
       ...prev,
       { role: "user", content: question },
-      { role: "assistant", content: "", reasoning: "", sources: sourceRefs },
+      { role: "assistant", content: "", reasoning: "" },
     ]);
     setStreaming(true);
 
     try {
       await streamChat(
-        { question, history, sources: wireSources },
+        { question, history, sessionCharts },
         {
+          onSources: (sources) => updateLastAssistant((m) => ({ ...m, sources })),
           onText: (d) => updateLastAssistant((m) => ({ ...m, content: m.content + d })),
           onThinking: (d) => updateLastAssistant((m) => ({ ...m, reasoning: (m.reasoning ?? "") + d })),
         },
@@ -113,6 +109,16 @@ export function ChatView() {
       }));
     } finally {
       setStreaming(false);
+    }
+  }
+
+  async function syncSaved() {
+    setReindex("syncing");
+    try {
+      const res = await fetch("/api/memories/reindex", { method: "POST" });
+      setReindex(res.ok ? "done" : "failed");
+    } catch {
+      setReindex("failed");
     }
   }
 
@@ -135,64 +141,36 @@ export function ChatView() {
         className="overflow-y-auto border-b px-6 py-6 lg:border-b-0 lg:border-r"
         style={{ borderColor: "var(--panel-border)" }}
       >
-        <h2 className="text-[15px] font-semibold text-[var(--foreground)]">Sources</h2>
-        <p className="mt-0.5 text-[13px] text-[var(--muted)]">
-          Add analyzed charts to ground the answer. The AI uses only what you select.
+        <h2 className="text-[15px] font-semibold text-[var(--foreground)]">Your memory</h2>
+        <p className="mt-0.5 text-[13px] leading-relaxed text-[var(--muted)]">
+          Ask anything. Agron searches this session&apos;s {analyzed.length} analyzed chart
+          {analyzed.length === 1 ? "" : "s"} and everything you&apos;ve saved, then answers grounded only
+          in what it finds.
         </p>
 
-        {analyzed.length === 0 ? (
-          <p className="mt-4 text-[13px] text-[var(--muted-light)]">
-            No analyzed charts yet.{" "}
-            <Link href="/" className="text-[var(--violet)]">
-              Go to Analyze
-            </Link>{" "}
-            to upload and analyze one, then come back.
-          </p>
-        ) : (
-          <ul className="mt-4 flex flex-col gap-2">
-            {analyzed.map((it) => {
-              const active = basket.includes(it.id);
-              return (
-                <li key={it.id}>
-                  <label
-                    className="flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2"
-                    style={{
-                      background: active ? "var(--violet-bg)" : "var(--panel)",
-                      borderColor: active ? "var(--violet-border)" : "var(--panel-border)",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={active}
-                      onChange={() => toggle(it.id)}
-                      className="accent-[var(--violet)]"
-                    />
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={it.previewUrl}
-                      alt=""
-                      className="h-9 w-9 shrink-0 rounded-md object-cover"
-                      style={{ border: "1px solid var(--panel-border)" }}
-                    />
-                    <span className="min-w-0 truncate text-[13px] text-[var(--foreground)]">{labelOf(it)}</span>
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={syncSaved}
+            disabled={reindex === "syncing"}
+            className="rounded-md border px-2.5 py-1 text-[12px] font-medium text-[var(--muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-50"
+            style={{ borderColor: "var(--panel-border)" }}
+          >
+            {reindex === "syncing" ? "Syncing…" : "Sync saved memories"}
+          </button>
+          {reindex === "done" ? <span className="text-[12px] text-[var(--accent)]">Index updated ✓</span> : null}
+          {reindex === "failed" ? <span className="text-[12px] text-[var(--danger)]">Sync failed</span> : null}
+        </div>
 
         {lastAssistant?.sources?.length ? (
           <div className="mt-8 border-t pt-6" style={{ borderColor: "var(--panel-border)" }}>
-            <h3 className="text-[14px] font-semibold text-[var(--foreground)]">
-              How this answer was assembled
-            </h3>
+            <h3 className="text-[14px] font-semibold text-[var(--foreground)]">How this answer was assembled</h3>
             <ul className="mt-3 flex flex-col gap-1.5">
               {lastAssistant.sources.map((s, i) => {
                 const n = i + 1;
                 const cited = citedNums.has(n);
                 return (
-                  <li key={s.id} className="flex items-center gap-2 text-[13px]">
+                  <li key={`${s.id}-${i}`} className="flex items-center gap-2 text-[13px]">
                     <span
                       className="inline-flex h-5 min-w-5 items-center justify-center rounded border px-1 text-[11px] font-medium"
                       style={
@@ -203,8 +181,11 @@ export function ChatView() {
                     >
                       {n}
                     </span>
-                    <span style={{ color: cited ? "var(--foreground)" : "var(--muted)" }}>
+                    <span className="min-w-0 truncate" style={{ color: cited ? "var(--foreground)" : "var(--muted)" }}>
                       {s.label}
+                    </span>
+                    <span className="text-[11px] text-[var(--muted-light)]">
+                      {s.origin === "saved" ? "saved" : "session"}
                       {cited ? "" : " · not cited"}
                     </span>
                   </li>
@@ -214,9 +195,7 @@ export function ChatView() {
 
             {lastAssistant.reasoning?.trim() ? (
               <details className="mt-4">
-                <summary className="cursor-pointer text-[13px] font-medium text-[var(--violet)]">
-                  Reasoning
-                </summary>
+                <summary className="cursor-pointer text-[13px] font-medium text-[var(--violet)]">Reasoning</summary>
                 <p className="mt-2 whitespace-pre-wrap text-[12.5px] leading-relaxed text-[var(--foreground-secondary)]">
                   {lastAssistant.reasoning}
                 </p>
@@ -232,8 +211,8 @@ export function ChatView() {
           {messages.length === 0 ? (
             <div className="flex h-full items-center justify-center">
               <p className="max-w-sm text-center text-[13px] text-[var(--muted)]">
-                Select one or more charts as sources, then ask a question about them. Answers are
-                grounded only in what you selected.
+                Ask about your charts — e.g. &ldquo;why was my NAS100 entry not the best?&rdquo; or &ldquo;what
+                biases show up in my setups?&rdquo; Answers come only from your analyzed and saved charts.
               </p>
             </div>
           ) : (
@@ -253,11 +232,7 @@ export function ChatView() {
               onKeyDown={onKeyDown}
               disabled={streaming}
               rows={2}
-              placeholder={
-                inScope.length === 0
-                  ? "Add a source on the left to begin…"
-                  : "Ask about the selected charts…"
-              }
+              placeholder="Ask anything about your charts…"
               className="w-full resize-none rounded-xl border p-3 pr-24 text-[13.5px] leading-relaxed text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-light)] focus:border-[var(--violet-border)] disabled:opacity-50"
               style={{ background: "var(--panel)", borderColor: "var(--panel-border)" }}
             />
@@ -289,7 +264,7 @@ export function ChatView() {
             </div>
           </div>
           <p className="mt-1.5 text-[11px] text-[var(--muted-light)]">
-            {inScope.length} source{inScope.length === 1 ? "" : "s"} in scope · grounded in your charts only
+            Grounded only in your charts — current session + saved memories.
           </p>
         </div>
       </section>
@@ -320,7 +295,7 @@ function MessageBubble({
               : { background: "var(--panel)", borderColor: "var(--panel-border)", color: "var(--foreground-secondary)" }
         }
       >
-        <p className="whitespace-pre-wrap">{message.content || (showThinking ? "Thinking…" : "")}</p>
+        <p className="whitespace-pre-wrap">{message.content || (showThinking ? "Searching your memory…" : "")}</p>
       </div>
     </div>
   );

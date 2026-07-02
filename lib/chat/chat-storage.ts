@@ -9,7 +9,6 @@ const KEY = "agron.chat";
 
 export interface PersistedChat {
   messages: ChatMessage[];
-  basket: string[];
 }
 
 export function loadChat(): PersistedChat | null {
@@ -18,7 +17,7 @@ export function loadChat(): PersistedChat | null {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (Array.isArray(data?.messages) && Array.isArray(data?.basket)) return data as PersistedChat;
+    if (Array.isArray(data?.messages)) return { messages: data.messages as ChatMessage[] };
     return null;
   } catch {
     return null;

@@ -1,12 +1,14 @@
-import type { ChatRequest } from "./types";
+import type { ChatRequest, ChatSourceRef } from "./types";
 
 /**
  * POST a question to /api/chat and consume the SSE stream, calling handlers as
- * text and reasoning (thinking) deltas arrive. Resolves when the stream ends.
+ * the retrieved sources, then reasoning (thinking) and text deltas arrive.
+ * Resolves when the stream ends.
  */
 export async function streamChat(
   req: ChatRequest,
   handlers: {
+    onSources: (sources: ChatSourceRef[]) => void;
     onText: (delta: string) => void;
     onThinking: (delta: string) => void;
     signal?: AbortSignal;
@@ -39,13 +41,14 @@ export async function streamChat(
       if (!frame.startsWith("data:")) continue;
       const data = frame.slice(5).trim();
       if (data === "[DONE]") return;
-      let obj: { type?: string; delta?: string; message?: string };
+      let obj: { type?: string; delta?: string; message?: string; sources?: ChatSourceRef[] };
       try {
         obj = JSON.parse(data);
       } catch {
         continue;
       }
-      if (obj.type === "text" && obj.delta) handlers.onText(obj.delta);
+      if (obj.type === "sources") handlers.onSources(obj.sources ?? []);
+      else if (obj.type === "text" && obj.delta) handlers.onText(obj.delta);
       else if (obj.type === "thinking" && obj.delta) handlers.onThinking(obj.delta);
       else if (obj.type === "error") throw new Error(obj.message ?? "Chat failed");
     }

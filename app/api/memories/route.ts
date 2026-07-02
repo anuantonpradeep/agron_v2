@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { putObject } from "@/lib/aws/s3";
 import { decodeSession, SESSION_COOKIE } from "@/lib/auth/session";
+import { toCatalogEntry, upsertCatalogEntry, type StoredMemory } from "@/lib/memories/catalog";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -71,6 +72,14 @@ export async function POST(request: Request) {
       body: JSON.stringify(doc, null, 2),
       contentType: "application/json",
     });
+
+    // Keep the search catalog in sync (best-effort — never fail the save).
+    try {
+      await upsertCatalogEntry(userId, toCatalogEntry(doc as unknown as StoredMemory));
+    } catch (err) {
+      console.error("catalog upsert failed", err);
+    }
+
     return Response.json({ id, savedAt, imageKey });
   } catch (err) {
     console.error("save memory failed", err);
