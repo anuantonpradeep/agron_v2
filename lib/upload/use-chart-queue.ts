@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChartAnalyzer, ChartItem, MemorySaver } from "./types";
 import { createChartAnalyzer } from "./analyzer";
 import { createMemorySaver } from "./memory-saver";
+import { loadQueue, saveQueue } from "./queue-storage";
 
 function makeId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -59,6 +60,49 @@ export function useChartQueue(analyzer?: ChartAnalyzer, saver?: MemorySaver): Ch
     itemsRef.current = items;
   }, [items]);
   const processingRef = useRef(false);
+  const hydratedRef = useRef(false);
+
+  // Rehydrate the queue from IndexedDB once, on mount. Interrupted work
+  // (analyzing/saving) is reset so it resumes cleanly.
+  useEffect(() => {
+    let cancelled = false;
+    void loadQueue().then((stored) => {
+      if (cancelled || stored.length === 0) {
+        hydratedRef.current = true;
+        return;
+      }
+      const restored: ChartItem[] = stored.map((s) => ({
+        ...s,
+        previewUrl: URL.createObjectURL(s.file),
+        status: s.status === "analyzing" ? "queued" : s.status,
+        saveStatus: s.saveStatus === "saving" ? "unsaved" : s.saveStatus,
+      }));
+      setItems(restored);
+      setSelectedId((prev) => prev ?? restored[0]?.id ?? null);
+      hydratedRef.current = true;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist the queue (debounced) after hydration, whenever it changes.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const timer = setTimeout(() => {
+      void saveQueue(
+        items.map(({ id, file, status, analysis, notes, saveStatus }) => ({
+          id,
+          file,
+          status,
+          analysis,
+          notes,
+          saveStatus,
+        })),
+      );
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [items]);
 
   const update = useCallback((id: string, patch: Partial<ChartItem>) => {
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));

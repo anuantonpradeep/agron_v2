@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChartQueueProvider } from "@/components/providers/chart-queue-provider";
+import { clearQueue } from "@/lib/upload/queue-storage";
 
 /**
  * App chrome: shared chart-queue provider + a slim top nav to switch between
@@ -36,6 +37,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 function SignOut() {
   async function signOut() {
+    await clearQueue().catch(() => {});
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     window.location.href = "/login";
   }
