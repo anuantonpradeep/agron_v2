@@ -13,3 +13,18 @@ export interface ChatRequest {
   history: { role: "user" | "assistant"; content: string }[];
   sources: ChatWireSource[];
 }
+
+/** A source that was in scope for an answer (shown in the provenance panel). */
+export interface ChatSourceRef {
+  id: string;
+  label: string;
+}
+
+/** One message in the conversation (persisted across refresh). */
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  reasoning?: string;
+  sources?: ChatSourceRef[];
+  error?: boolean;
+}

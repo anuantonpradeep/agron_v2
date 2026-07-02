@@ -4,20 +4,10 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useChartQueueContext } from "@/components/providers/chart-queue-provider";
 import { streamChat } from "@/lib/chat/stream-chat";
+import { loadChat, saveChat } from "@/lib/chat/chat-storage";
 import { useDictation } from "@/components/analysis/use-dictation";
 import type { ChartItem } from "@/lib/upload/types";
-
-interface ChatSourceRef {
-  id: string;
-  label: string;
-}
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  reasoning?: string;
-  sources?: ChatSourceRef[];
-  error?: boolean;
-}
+import type { ChatMessage, ChatSourceRef } from "@/lib/chat/types";
 
 function labelOf(item: ChartItem): string {
   return item.analysis?.metadata?.symbol?.trim() || item.file.name;
@@ -26,7 +16,8 @@ function labelOf(item: ChartItem): string {
 /**
  * Cursor-style split: workbench (sources + provenance) on the left, chat on the
  * right. Grounded in the current session's analyzed charts that the user adds
- * to the basket. Nothing is persisted.
+ * to the basket. The conversation + basket persist across refresh (localStorage);
+ * cleared on sign-out.
  */
 export function ChatView() {
   const queue = useChartQueueContext();
@@ -36,6 +27,30 @@ export function ChatView() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const hydratedRef = useRef(false);
+
+  // Restore the conversation + basket once, on mount.
+  useEffect(() => {
+    const persisted = loadChat();
+    if (persisted) {
+      let restored = persisted.messages;
+      // Drop a trailing assistant message left empty by an interrupted stream.
+      const last = restored[restored.length - 1];
+      if (last && last.role === "assistant" && !last.content.trim()) {
+        restored = restored.slice(0, -1);
+      }
+      setMessages(restored);
+      setBasket(persisted.basket);
+    }
+    hydratedRef.current = true;
+  }, []);
+
+  // Persist (debounced) after hydration.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const timer = setTimeout(() => saveChat({ messages, basket }), 400);
+    return () => clearTimeout(timer);
+  }, [messages, basket]);
 
   const { supported: micSupported, listening, start: micStart, stop: micStop } = useDictation((chunk) =>
     setInput((prev) => (prev.trim() ? `${prev.trim()} ${chunk}` : chunk)),
